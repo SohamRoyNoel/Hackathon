@@ -5,6 +5,7 @@ const defaultRoles = [
   {
     roleId: 'Role001',
     roleName: 'Role001',
+    passKey: 'pass001',
     access: {
       businessData: 'R',
       salesData: 'R',
@@ -15,6 +16,7 @@ const defaultRoles = [
   {
     roleId: 'Role002',
     roleName: 'Role002',
+    passKey: 'pass002',
     access: {
       businessData: 'RW',
       salesData: 'R',
@@ -25,6 +27,7 @@ const defaultRoles = [
   {
     roleId: 'Role003',
     roleName: 'Role003',
+    passKey: 'pass003',
     access: {
       businessData: 'R',
       salesData: 'RW',
@@ -35,6 +38,7 @@ const defaultRoles = [
   {
     roleId: 'Role004',
     roleName: 'Role004',
+    passKey: 'pass004',
     access: {
       businessData: 'RW',
       salesData: 'RW',
@@ -45,6 +49,7 @@ const defaultRoles = [
   {
     roleId: 'CEO',
     roleName: 'CEO',
+    passKey: 'passceo',
     access: {
       businessData: 'RW',
       salesData: 'RW',

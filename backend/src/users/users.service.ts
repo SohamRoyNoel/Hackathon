@@ -79,16 +79,18 @@ export class UsersService {
     return JSON.stringify(payload);
   }
 
-  private async triggerPostAgentCommand(agentMessage: string): Promise<void> {
-    const sshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
-    const sshKeyPath =
-      process.env.POST_AGENT_SSH_KEY_PATH ?? process.env.SSH_KEY_PATH;
+  private async triggerPostAgentCommand(
+    agentMessage: string,
+    passKey?: string,
+    roleId?: string,
+  ): Promise<void> {
+    const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
     const remoteCommandTemplate =
       process.env.POST_AGENT_SSH_COMMAND ??
       process.env.SSH_REMOTE_COMMAND ??
-      'pwd';
+      'ls';
 
-    if (!sshHost || !sshKeyPath) {
+    if (!rawSshHost) {
       return;
     }
 
@@ -102,25 +104,24 @@ export class UsersService {
       ? remoteCommandTemplate.replace(/%MESSAGE%/g, safeMessage)
       : remoteCommandTemplate;
 
+    const password = (passKey ?? '').replace(/'/g, "'\\''");
+    const sshHost = roleId
+      ? `${roleId.toLowerCase()}${rawSshHost}`
+      : rawSshHost;
+    const sshCommand = [
+      `sshpass -p '${password}' ssh`,
+      '-o',
+      'ConnectTimeout=10',
+      '-o',
+      'StrictHostKeyChecking=no',
+      '-o',
+      'UserKnownHostsFile=/dev/null',
+      sshHost,
+      `'${remoteCommand.replace(/'/g, "'\\''")}'`,
+    ].join(' ');
+
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        'ssh',
-        [
-          '-i',
-          sshKeyPath,
-          '-o',
-          'BatchMode=yes',
-          '-o',
-          'ConnectTimeout=10',
-          '-o',
-          'StrictHostKeyChecking=no',
-          '-o',
-          'UserKnownHostsFile=/dev/null',
-          sshHost,
-          remoteCommand,
-        ],
-        { stdio: 'inherit' },
-      );
+      const child = spawn('bash', ['-lc', sshCommand], { stdio: 'inherit' });
 
       child.on('error', reject);
       child.on('exit', (code) => {
@@ -172,6 +173,8 @@ export class UsersService {
     });
 
     const shouldNotifyAgent = createUserDto.shouldIncludeScan;
+    const selectedPassKey = foundRoles[0]?.passKey;
+    const selectedRoleId = foundRoles[0]?.roleId;
 
     const agentMessage = shouldNotifyAgent
       ? await this.generateClaudeMessage()
@@ -179,7 +182,11 @@ export class UsersService {
 
     console.log('Claude agent message:', agentMessage);
 
-    await this.triggerPostAgentCommand(agentMessage);
+    await this.triggerPostAgentCommand(
+      agentMessage,
+      selectedPassKey,
+      selectedRoleId,
+    );
 
     return {
       message: agentMessage,

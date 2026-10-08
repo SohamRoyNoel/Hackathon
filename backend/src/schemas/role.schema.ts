@@ -19,6 +19,9 @@ export class Role {
   @Prop({ required: true, unique: true })
   roleName!: string;
 
+  @Prop({ required: true, unique: true })
+  passKey!: string;
+
   @Prop({
     type: {
       businessData: {
