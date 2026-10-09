@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
   analyzeReport,
+  stripAnsi,
   type AnalysisResult,
 } from '../blue-team/report-analyzer';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -260,6 +261,8 @@ console.log("--==dd===> ", passKey);
     }
 
     const result = analyzeReport(reportText);
+    // Attach the raw report (ANSI stripped) so the UI can display it.
+    result.report = stripAnsi(reportText);
 
     console.log(
       `Blue team analysis: outcome=${result.outcome} ` +
@@ -274,13 +277,11 @@ console.log("--==dd===> ", passKey);
   }
 
   async create(createUserDto: CreateUserDto) {
-    const existingUser = await this.userModel.findOne({
-      userName: createUserDto.userName,
-    });
-
-    if (existingUser) {
+    // Maker and Checker are mutually exclusive; both together is not allowed.
+    const requestedRoles = createUserDto.role.map((role) => role.toLowerCase());
+    if (requestedRoles.includes('maker') && requestedRoles.includes('checker')) {
       return {
-        message: 'user already exists',
+        message: 'illegal role allocation',
       };
     }
 
@@ -300,18 +301,53 @@ console.log("--==dd===> ", passKey);
       };
     }
 
-    const createdUser = await this.userModel.create({
+    const existingUser = await this.userModel.findOne({
       userName: createUserDto.userName,
-      roleId: foundRoleIds,
     });
 
+    let user: UserDocument;
+    let action: 'created' | 'updated';
+
+    if (existingUser) {
+      const currentRoleIds = existingUser.roleId
+        .map((id) => id.toString())
+        .sort();
+      const incomingRoleIds = foundRoleIds.map((id) => id.toString()).sort();
+      const sameRoles =
+        currentRoleIds.length === incomingRoleIds.length &&
+        currentRoleIds.every((id, index) => id === incomingRoleIds[index]);
+
+      // Nothing changed in the DB: don't trigger the agent, just report back.
+      if (sameRoles) {
+        return {
+          message: `User '${createUserDto.userName}' already has the requested role(s).`,
+          user: existingUser,
+          roles: foundRoles,
+          outcome: false,
+        };
+      }
+
+      // User exists with different role(s): override the current role(s).
+      existingUser.roleId = foundRoleIds;
+      await existingUser.save();
+      user = existingUser;
+      action = 'updated';
+    } else {
+      user = await this.userModel.create({
+        userName: createUserDto.userName,
+        roleId: foundRoleIds,
+      });
+      action = 'created';
+    }
+
+    // The DB was updated (created or updated), so trigger the agent either way.
     const shouldNotifyAgent = createUserDto.shouldIncludeScan;
     const selectedRoleName = foundRoles[0]?.roleName;
     const selectedPassKey = foundRoles[0]?.passKey;
 
     const agentMessage = shouldNotifyAgent
       ? await this.generateClaudeMessage()
-      : `User '${createUserDto.userName}' created successfully.`;
+      : `User '${createUserDto.userName}' ${action} successfully.`;
 
     console.log('Claude agent message:', agentMessage);
 
@@ -328,7 +364,8 @@ console.log("--==dd===> ", passKey);
 
     return {
       message: agentMessage,
-      createdUser,
+      user,
+      action,
       roles: foundRoles,
       shouldIncludeScan: createUserDto.shouldIncludeScan,
       // The value the blue team cares about: did a dangerous event happen?

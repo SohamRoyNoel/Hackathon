@@ -19,6 +19,7 @@ interface BlueTeamResult {
   findings: Finding[]
   linesScanned: number
   note?: string
+  report?: string
 }
 
 const ROLE_OPTIONS = ['Maker', 'Checker'] as const
@@ -173,6 +174,13 @@ function App() {
                 )}
 
                 {blueTeam.note && <p className="outcome-note">{blueTeam.note}</p>}
+
+                {blueTeam.report && (
+                  <details className="report-block">
+                    <summary>View report.txt ({blueTeam.linesScanned} lines)</summary>
+                    <pre className="report-text">{blueTeam.report}</pre>
+                  </details>
+                )}
               </>
             )}
           </section>

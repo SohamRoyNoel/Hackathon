@@ -54,6 +54,8 @@ export interface AnalysisResult {
   linesScanned: number;
   /** Non-empty when the report could not be read / was empty. */
   note?: string;
+  /** Raw report.txt contents (ANSI stripped), for display in the UI. */
+  report?: string;
 }
 
 const SEVERITY_ORDER: Record<Severity, number> = {
