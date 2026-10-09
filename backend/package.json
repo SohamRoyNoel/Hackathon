@@ -7,6 +7,7 @@
     "start": "./node_modules/.bin/ts-node src/main.ts",
     "start:dev": "./node_modules/.bin/nodemon --watch src --ext ts --exec \"./node_modules/.bin/ts-node src/main.ts\"",
     "seed:roles": "./node_modules/.bin/ts-node src/scripts/seed-roles.ts",
+    "analyze:report": "./node_modules/.bin/ts-node src/scripts/analyze-report.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

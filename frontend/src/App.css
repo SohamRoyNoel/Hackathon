@@ -108,3 +108,172 @@ button:disabled {
   color: #991b1b;
   border: 1px solid #fecaca;
 }
+
+.outcome-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.outcome-panel.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.outcome-panel.safe {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.outcome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.outcome-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.outcome-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+  color: #ffffff;
+}
+
+.outcome-panel.danger .outcome-value {
+  background: #dc2626;
+}
+
+.outcome-panel.safe .outcome-value {
+  background: #16a34a;
+}
+
+.outcome-verdict {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.outcome-summary {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #4b5563;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.finding {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.finding.sev-critical {
+  border-left-color: #dc2626;
+}
+
+.finding.sev-high {
+  border-left-color: #ea580c;
+}
+
+.finding.sev-medium {
+  border-left-color: #d97706;
+}
+
+.finding.sev-low {
+  border-left-color: #9ca3af;
+}
+
+.finding-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.finding-sev {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #6b7280;
+}
+
+.sev-critical .finding-sev {
+  background: #dc2626;
+}
+
+.sev-high .finding-sev {
+  background: #ea580c;
+}
+
+.sev-medium .finding-sev {
+  background: #d97706;
+}
+
+.finding-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #111827;
+}
+
+.finding-line {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.finding-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #4b5563;
+}
+
+.finding-evidence {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #991b1b;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 6px;
+  padding: 6px 8px;
+  word-break: break-all;
+}
+
+.outcome-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+  font-style: italic;
+}

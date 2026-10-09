@@ -1,7 +1,12 @@
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import {
+  analyzeReport,
+  type AnalysisResult,
+} from '../blue-team/report-analyzer';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { Role, RoleDocument } from '../schemas/role.schema';
 import { User, UserDocument } from '../schemas/user.schema';
@@ -140,6 +145,84 @@ export class UsersService {
     });
   }
 
+  /**
+   * Fetch the red-team report back from the remote host over SSH.
+   * The post-agent command appends its scan to a remote file (default
+   * /tmp/report.txt); here we `cat` it and capture stdout for analysis.
+   */
+  private async fetchRemoteReport(
+    passKey?: string,
+    roleId?: string,
+  ): Promise<string | null> {
+    const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
+    if (!rawSshHost) {
+      return null;
+    }
+
+    const remotePath = process.env.POST_AGENT_REPORT_PATH ?? '/tmp/report.txt';
+    const password = (passKey ?? '').replace(/'/g, "'\\''");
+    const sshHost = roleId
+      ? `${roleId.toLowerCase()}${rawSshHost}`
+      : rawSshHost;
+    const remoteCommand = `cat '${remotePath.replace(/'/g, "'\\''")}'`;
+    const sshCommand = [
+      `sshpass -p '${password}' ssh`,
+      '-o',
+      'ConnectTimeout=10',
+      '-o',
+      'StrictHostKeyChecking=no',
+      '-o',
+      'UserKnownHostsFile=/dev/null',
+      sshHost,
+      `'${remoteCommand}'`,
+    ].join(' ');
+
+    return new Promise<string | null>((resolve) => {
+      const child = spawn('bash', ['-lc', sshCommand], {
+        stdio: ['ignore', 'pipe', 'inherit'],
+      });
+
+      let stdout = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => resolve(code === 0 ? stdout : null));
+    });
+  }
+
+  /**
+   * Blue-team step: read the report (remote first, local fallback) and decide
+   * whether a dangerous event has happened. The caller only needs `outcome`.
+   */
+  private async analyzePostAgentReport(
+    passKey?: string,
+    roleId?: string,
+  ): Promise<AnalysisResult> {
+    let reportText = await this.fetchRemoteReport(passKey, roleId);
+
+    if (reportText === null) {
+      const localPath =
+        process.env.POST_AGENT_REPORT_PATH ?? '/tmp/report.txt';
+      reportText = existsSync(localPath)
+        ? readFileSync(localPath, 'utf8')
+        : '';
+    }
+
+    const result = analyzeReport(reportText);
+
+    console.log(
+      `Blue team analysis: outcome=${result.outcome} ` +
+        `(CRITICAL=${result.summary.CRITICAL} HIGH=${result.summary.HIGH} ` +
+        `MEDIUM=${result.summary.MEDIUM} LOW=${result.summary.LOW})`,
+    );
+    if (result.outcome) {
+      console.warn('Blue team: DANGEROUS EVENT DETECTED (outcome=true)');
+    }
+
+    return result;
+  }
+
   async create(createUserDto: CreateUserDto) {
     const existingUser = await this.userModel.findOne({
       userName: createUserDto.userName,
@@ -188,11 +271,19 @@ export class UsersService {
       selectedRoleId,
     );
 
+    // Blue-team step: analyze the report produced by the red-team scan.
+    const blueTeam = shouldNotifyAgent
+      ? await this.analyzePostAgentReport(selectedPassKey, selectedRoleId)
+      : undefined;
+
     return {
       message: agentMessage,
       createdUser,
       roles: foundRoles,
       shouldIncludeScan: createUserDto.shouldIncludeScan,
+      // The value the blue team cares about: did a dangerous event happen?
+      outcome: blueTeam?.outcome ?? false,
+      blueTeam,
     };
   }
 }
