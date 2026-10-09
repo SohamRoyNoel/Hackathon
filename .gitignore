@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Engagement artifacts — CONTAIN SECRETS (private keys, passwords, recon). Never commit.
+engagements/
+
+# Keys / credentials (defense in depth)
+*.pem
+*.key
+id_key
+id_rsa*
+id_ed25519*
+chain_key*
+ssh.sh
+ssh_*.sh
+*.exp
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
