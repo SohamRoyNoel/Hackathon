@@ -1,12 +1,23 @@
 import { useState } from 'react'
 import './App.css'
 
+type IncidentAssessment = {
+  incidentOccurred: boolean
+  verdict: 'red' | 'green'
+  severity: 'none' | 'low' | 'medium' | 'high' | 'critical'
+  title: string
+  rationale: string
+  evidence?: string[]
+  degraded?: boolean
+}
+
 function App() {
   const [users, setUsers] = useState('')
   const [role, setRole] = useState('')
   const [ignoreDefaultRoleScanSkip, setIgnoreDefaultRoleScanSkip] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [responseMessage, setResponseMessage] = useState('')
+  const [incident, setIncident] = useState<IncidentAssessment | null>(null)
 
   const isFormComplete = users.trim().length > 0 && role !== ''
 
@@ -19,6 +30,7 @@ function App() {
 
     setIsSubmitting(true)
     setResponseMessage('')
+    setIncident(null)
 
     try {
       const response = await fetch('http://localhost:3002/users', {
@@ -40,6 +52,7 @@ function App() {
       const data = await response.json()
       const message = data?.message || JSON.stringify(data)
       setResponseMessage(message)
+      setIncident(data?.incident ?? null)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       setResponseMessage(message)
@@ -103,6 +116,42 @@ function App() {
           <p className={`response ${responseMessage === 'user already exists' ? 'error' : 'success'}`}>
             {responseMessage}
           </p>
+        )}
+
+        {incident && (
+          <div className={`incident-card ${incident.verdict}`}>
+            <div className="incident-head">
+              <span className="incident-icon" aria-hidden="true">
+                {incident.incidentOccurred ? '❌' : '✅'}
+              </span>
+              <div>
+                <strong>
+                  {incident.incidentOccurred
+                    ? 'Security incident detected'
+                    : 'No impactful security incident'}
+                </strong>
+                <div className="incident-title">{incident.title}</div>
+              </div>
+              <span className={`incident-sev sev-${incident.severity}`}>
+                {incident.severity.toUpperCase()}
+              </span>
+            </div>
+            {incident.rationale && (
+              <p className="incident-rationale">{incident.rationale}</p>
+            )}
+            {incident.evidence && incident.evidence.length > 0 && (
+              <ul className="incident-evidence">
+                {incident.evidence.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            )}
+            {incident.degraded && (
+              <p className="incident-degraded">
+                ⚠️ Heuristic verdict (LLM judge unavailable).
+              </p>
+            )}
+          </div>
         )}
       </form>
     </main>

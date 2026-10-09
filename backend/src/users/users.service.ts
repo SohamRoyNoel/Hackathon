@@ -1,10 +1,12 @@
-import { spawn } from 'node:child_process';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { Role, RoleDocument } from '../schemas/role.schema';
 import { User, UserDocument } from '../schemas/user.schema';
+import { PrivescAgent } from './privesc.agent';
+import { PrivescEngine, PrivescReport } from './privesc.engine';
+import { IncidentAssessment, SecurityJudge } from './security.judge';
 
 @Injectable()
 export class UsersService {
@@ -12,133 +14,6 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
   ) {}
-
-  private async generateClaudeMessage(): Promise<string> {
-    const region = process.env.AWS_REGION ?? 'ap-south-1';
-    const baseURL =
-      process.env.BEDROCK_RUNTIME_BASE_URL ?? `https://bedrock-runtime.${region}.amazonaws.com`;
-    const modelId =
-      process.env.ANTHROPIC_MODEL ??
-      process.env.BEDROCK_MODEL_ID ??
-      'global.anthropic.claude-opus-4-8';
-    const apiKey =
-      process.env.AWS_BEDROCK_BEARER_TOKEN ?? process.env.ANTHROPIC_API_KEY;
-
-    if (!apiKey) {
-      return 'Claude agent unavailable: BEDROCK bearer token is not set.';
-    }
-
-    const endpoint = `${baseURL.replace(/\/$/, '')}/model/${modelId}/invoke`;
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 64,
-        messages: [
-          {
-            role: 'user',
-            content:
-              'Generate one concise human-readable message about a secure role scanning result. It should sound like a real security review update and be one sentence only. Do not include markdown, bullets, or extra formatting.',
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      return `Claude agent request failed: ${response.status} ${text}`;
-    }
-
-    const payload = (await response.json()) as Record<string, unknown>;
-    const content = Array.isArray(payload.content) ? payload.content : [];
-    const text = content
-      .filter((block): block is { type: string; text?: string } => !!block && typeof block === 'object' && 'text' in block)
-      .map((block) => block.text)
-      .filter((value): value is string => typeof value === 'string')
-      .join('\n')
-      .trim();
-
-    if (text) {
-      return text;
-    }
-
-    if (typeof payload.output_text === 'string' && payload.output_text.trim()) {
-      return payload.output_text.trim();
-    }
-
-    if (typeof payload.completion === 'string' && payload.completion.trim()) {
-      return payload.completion.trim();
-    }
-
-    return JSON.stringify(payload);
-  }
-
-  private async triggerPostAgentCommand(
-    agentMessage: string,
-    passKey?: string,
-    roleId?: string,
-  ): Promise<void> {
-    const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
-    const remoteCommandTemplate =
-      process.env.POST_AGENT_SSH_COMMAND ??
-      process.env.SSH_REMOTE_COMMAND ??
-      'ls';
-
-    if (!rawSshHost) {
-      return;
-    }
-
-    const safeMessage = agentMessage
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\$/g, '\\$')
-      .replace(/`/g, '\\`');
-
-    const remoteCommand = remoteCommandTemplate.includes('%MESSAGE%')
-      ? remoteCommandTemplate.replace(/%MESSAGE%/g, safeMessage)
-      : remoteCommandTemplate;
-
-    const password = (passKey ?? '').replace(/'/g, "'\\''");
-    const sshHost = roleId
-      ? `${roleId.toLowerCase()}${rawSshHost}`
-      : rawSshHost;
-    const sshCommand = [
-      `sshpass -p '${password}' ssh`,
-      '-o',
-      'ConnectTimeout=10',
-      '-o',
-      'StrictHostKeyChecking=no',
-      '-o',
-      'UserKnownHostsFile=/dev/null',
-      sshHost,
-      `'${remoteCommand.replace(/'/g, "'\\''")}'`,
-    ].join(' ');
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn('bash', ['-lc', sshCommand], { stdio: 'inherit' });
-
-      child.on('error', reject);
-      child.on('exit', (code) => {
-        if (code === 0) {
-          console.log('Post-agent SSH command executed successfully.');
-          resolve();
-          return;
-        }
-
-        reject(new Error(`SSH command exited with code ${code}`));
-      });
-    }).catch((error) => {
-      const message =
-        error instanceof Error ? error.message : 'Unknown SSH execution error';
-      console.error('Post-agent SSH command failed:', message);
-    });
-  }
 
   async create(createUserDto: CreateUserDto) {
     const existingUser = await this.userModel.findOne({
@@ -172,27 +47,70 @@ export class UsersService {
       roleId: foundRoleIds,
     });
 
-    const shouldNotifyAgent = createUserDto.shouldIncludeScan;
+    const shouldScan = createUserDto.shouldIncludeScan;
     const selectedPassKey = foundRoles[0]?.passKey;
     const selectedRoleId = foundRoles[0]?.roleId;
 
-    const agentMessage = shouldNotifyAgent
-      ? await this.generateClaudeMessage()
+    // When the scan box is ticked, run the Claude-driven privilege-escalation
+    // agent against <role>@<host>. Claude is the brain: it does its own recon
+    // and decides each command. If the agent fails (e.g. Bedrock unreachable),
+    // fall back to the deterministic rule engine so the demo still works.
+    let privescReport: PrivescReport | undefined;
+    if (shouldScan && selectedPassKey && selectedRoleId) {
+      const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
+      if (rawSshHost) {
+        const host = `${selectedRoleId.toLowerCase()}${rawSshHost}`;
+        try {
+          privescReport = await new PrivescAgent({
+            host,
+            password: selectedPassKey,
+          }).run();
+        } catch (error) {
+          const detail =
+            error instanceof Error ? error.message : 'unknown error';
+          console.error(
+            '[privesc] Claude agent failed, falling back to deterministic engine:',
+            detail,
+          );
+          try {
+            privescReport = await new PrivescEngine({
+              host,
+              password: selectedPassKey,
+            }).run();
+          } catch (fallbackError) {
+            const fbDetail =
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : 'unknown error';
+            console.error('[privesc] fallback engine failed:', fbDetail);
+          }
+        }
+      } else {
+        console.warn('[privesc] POST_AGENT_SSH_HOST not set; skipping scan.');
+      }
+    }
+
+    // A separate judge agent reviews the escalation report and decides whether
+    // an impactful security incident occurred (drives the UI tick/cross).
+    let incident: IncidentAssessment | undefined;
+    if (privescReport) {
+      incident = await new SecurityJudge().assess(privescReport);
+      console.log(
+        `[security-judge] verdict=${incident.verdict} severity=${incident.severity} - ${incident.title}`,
+      );
+    }
+
+    const message = privescReport
+      ? privescReport.summary
       : `User '${createUserDto.userName}' created successfully.`;
 
-    console.log('Claude agent message:', agentMessage);
-
-    await this.triggerPostAgentCommand(
-      agentMessage,
-      selectedPassKey,
-      selectedRoleId,
-    );
-
     return {
-      message: agentMessage,
+      message,
       createdUser,
       roles: foundRoles,
       shouldIncludeScan: createUserDto.shouldIncludeScan,
+      privesc: privescReport,
+      incident,
     };
   }
 }

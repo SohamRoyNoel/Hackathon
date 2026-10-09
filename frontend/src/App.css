@@ -108,3 +108,90 @@ button:disabled {
   color: #991b1b;
   border: 1px solid #fecaca;
 }
+
+.incident-card {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  border: 1px solid transparent;
+}
+
+.incident-card.red {
+  background: #fef2f2;
+  color: #7f1d1d;
+  border-color: #fecaca;
+}
+
+.incident-card.green {
+  background: #ecfdf5;
+  color: #14532d;
+  border-color: #a7f3d0;
+}
+
+.incident-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.incident-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.incident-title {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.incident-sev {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.sev-critical,
+.sev-high {
+  background: #dc2626;
+  color: #fff;
+}
+
+.sev-medium {
+  background: #f59e0b;
+  color: #1f2937;
+}
+
+.sev-low,
+.sev-none {
+  background: #d1d5db;
+  color: #1f2937;
+}
+
+.incident-rationale {
+  margin: 10px 0 0;
+  line-height: 1.4;
+}
+
+.incident-evidence {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+
+.incident-evidence li {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.incident-degraded {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
