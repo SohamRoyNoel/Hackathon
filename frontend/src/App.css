@@ -52,6 +52,23 @@
   outline-offset: 1px;
 }
 
+.option-group {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.option-group legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #111827;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

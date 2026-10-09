@@ -21,6 +21,8 @@ interface BlueTeamResult {
   note?: string
 }
 
+const ROLE_OPTIONS = ['Maker', 'Checker'] as const
+
 interface CreateUserResponse {
   message: string
   outcome?: boolean
@@ -29,14 +31,19 @@ interface CreateUserResponse {
 
 function App() {
   const [users, setUsers] = useState('')
-  const [role, setRole] = useState('')
-  const [ignoreDefaultRoleScanSkip, setIgnoreDefaultRoleScanSkip] = useState(false)
+  const [roles, setRoles] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [responseMessage, setResponseMessage] = useState('')
   const [outcome, setOutcome] = useState<boolean | null>(null)
   const [blueTeam, setBlueTeam] = useState<BlueTeamResult | null>(null)
 
-  const isFormComplete = users.trim().length > 0 && role !== ''
+  const isFormComplete = users.trim().length > 0 && roles.length > 0
+
+  const toggleRole = (roleName: string, checked: boolean) => {
+    setRoles((current) =>
+      checked ? [...current, roleName] : current.filter((existing) => existing !== roleName),
+    )
+  }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -58,8 +65,8 @@ function App() {
         },
         body: JSON.stringify({
           userName: users,
-          role: [role],
-          shouldIncludeScan: ignoreDefaultRoleScanSkip,
+          role: roles,
+          shouldIncludeScan: false,
         }),
       })
 
@@ -83,7 +90,7 @@ function App() {
   return (
     <main className="page-shell">
       <form className="form-card" onSubmit={handleSubmit}>
-        <h1>Role Assignment</h1>
+        <h1>SecureX</h1>
 
         <label className="field" htmlFor="users">
           <span>Users</span>
@@ -97,33 +104,22 @@ function App() {
           />
         </label>
 
-        <label className="field" htmlFor="role">
-          <span>Role</span>
-          <select
-            id="role"
-            name="role"
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-          >
-            <option value="">Select role</option>
-            <option value="Role001">Role001</option>
-            <option value="Role002">Role002</option>
-            <option value="Role003">Role003</option>
-            <option value="Role004">Role004</option>
-            <option value="Super_User">Super User</option>
-          </select>
-        </label>
-
-        <label className="checkbox-row" htmlFor="ignoreDefaultRoleScanSkip">
-          <input
-            id="ignoreDefaultRoleScanSkip"
-            name="ignoreDefaultRoleScanSkip"
-            type="checkbox"
-            checked={ignoreDefaultRoleScanSkip}
-            onChange={(event) => setIgnoreDefaultRoleScanSkip(event.target.checked)}
-          />
-          <span>Ignore default role scan skip</span>
-        </label>
+        <fieldset className="option-group">
+          <legend>Role</legend>
+          {ROLE_OPTIONS.map((roleName) => (
+            <label key={roleName} className="checkbox-row" htmlFor={`role-${roleName}`}>
+              <input
+                id={`role-${roleName}`}
+                name="role"
+                type="checkbox"
+                value={roleName}
+                checked={roles.includes(roleName)}
+                onChange={(event) => toggleRole(roleName, event.target.checked)}
+              />
+              <span>{roleName}</span>
+            </label>
+          ))}
+        </fieldset>
 
         {isFormComplete && (
           <button type="submit" disabled={isSubmitting}>

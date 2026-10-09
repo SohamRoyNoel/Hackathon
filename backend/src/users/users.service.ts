@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -17,6 +20,43 @@ export class UsersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Role.name) private readonly roleModel: Model<RoleDocument>,
   ) {}
+
+  /**
+   * Lets regular `ssh` answer its own password prompt non-interactively.
+   * We point SSH_ASKPASS at a tiny helper script and force its use; the
+   * script echoes the password from an env var, so the secret never lands
+   * on disk. Call cleanup() once the child process has exited.
+   */
+  private createAskpass(passKey?: string): {
+    env: NodeJS.ProcessEnv;
+    cleanup: () => void;
+  } {
+    const scriptPath = join(
+      tmpdir(),
+      `ssh-askpass-${randomBytes(6).toString('hex')}.sh`,
+    );
+    writeFileSync(scriptPath, '#!/bin/sh\nprintf \'%s\\n\' "$SSH_PASSWORD"\n', {
+      mode: 0o700,
+    });
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SSH_ASKPASS: scriptPath,
+      SSH_ASKPASS_REQUIRE: 'force',
+      SSH_PASSWORD: passKey ?? '',
+      DISPLAY: process.env.DISPLAY ?? ':0',
+    };
+console.log("--==dd===> ", passKey);
+    const cleanup = () => {
+      try {
+        unlinkSync(scriptPath);
+      } catch {
+        // best-effort; ignore if already gone
+      }
+    };
+
+    return { env, cleanup };
+  }
 
   private async generateClaudeMessage(): Promise<string> {
     const region = process.env.AWS_REGION ?? 'ap-south-1';
@@ -86,8 +126,8 @@ export class UsersService {
 
   private async triggerPostAgentCommand(
     agentMessage: string,
+    roleName?: string,
     passKey?: string,
-    roleId?: string,
   ): Promise<void> {
     const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
     const remoteCommandTemplate =
@@ -109,24 +149,24 @@ export class UsersService {
       ? remoteCommandTemplate.replace(/%MESSAGE%/g, safeMessage)
       : remoteCommandTemplate;
 
-    const password = (passKey ?? '').replace(/'/g, "'\\''");
-    const sshHost = roleId
-      ? `${roleId.toLowerCase()}${rawSshHost}`
+    const sshHost = roleName
+      ? `${roleName.toLowerCase()}${rawSshHost}`
       : rawSshHost;
-    const sshCommand = [
-      `sshpass -p '${password}' ssh`,
-      '-o',
-      'ConnectTimeout=10',
+    console.log('--====> ', sshHost);
+
+    // Regular ssh; the role's passKey answers the password prompt via askpass.
+    const { env, cleanup } = this.createAskpass(passKey);
+    const sshArgs = [
       '-o',
       'StrictHostKeyChecking=no',
       '-o',
       'UserKnownHostsFile=/dev/null',
       sshHost,
-      `'${remoteCommand.replace(/'/g, "'\\''")}'`,
-    ].join(' ');
+      remoteCommand,
+    ];
 
     await new Promise<void>((resolve, reject) => {
-      const child = spawn('bash', ['-lc', sshCommand], { stdio: 'inherit' });
+      const child = spawn('ssh', sshArgs, { stdio: 'inherit', env });
 
       child.on('error', reject);
       child.on('exit', (code) => {
@@ -138,11 +178,13 @@ export class UsersService {
 
         reject(new Error(`SSH command exited with code ${code}`));
       });
-    }).catch((error) => {
-      const message =
-        error instanceof Error ? error.message : 'Unknown SSH execution error';
-      console.error('Post-agent SSH command failed:', message);
-    });
+    })
+      .catch((error) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown SSH execution error';
+        console.error('Post-agent SSH command failed:', message);
+      })
+      .finally(cleanup);
   }
 
   /**
@@ -151,8 +193,8 @@ export class UsersService {
    * /tmp/report.txt); here we `cat` it and capture stdout for analysis.
    */
   private async fetchRemoteReport(
+    roleName?: string,
     passKey?: string,
-    roleId?: string,
   ): Promise<string | null> {
     const rawSshHost = process.env.POST_AGENT_SSH_HOST ?? process.env.SSH_HOST;
     if (!rawSshHost) {
@@ -160,13 +202,14 @@ export class UsersService {
     }
 
     const remotePath = process.env.POST_AGENT_REPORT_PATH ?? '/tmp/report.txt';
-    const password = (passKey ?? '').replace(/'/g, "'\\''");
-    const sshHost = roleId
-      ? `${roleId.toLowerCase()}${rawSshHost}`
+    const sshHost = roleName
+      ? `${roleName.toLowerCase()}${rawSshHost}`
       : rawSshHost;
     const remoteCommand = `cat '${remotePath.replace(/'/g, "'\\''")}'`;
-    const sshCommand = [
-      `sshpass -p '${password}' ssh`,
+
+    // Regular ssh; the role's passKey answers the password prompt via askpass.
+    const { env, cleanup } = this.createAskpass(passKey);
+    const sshArgs = [
       '-o',
       'ConnectTimeout=10',
       '-o',
@@ -174,20 +217,27 @@ export class UsersService {
       '-o',
       'UserKnownHostsFile=/dev/null',
       sshHost,
-      `'${remoteCommand}'`,
-    ].join(' ');
+      remoteCommand,
+    ];
 
     return new Promise<string | null>((resolve) => {
-      const child = spawn('bash', ['-lc', sshCommand], {
+      const child = spawn('ssh', sshArgs, {
         stdio: ['ignore', 'pipe', 'inherit'],
+        env,
       });
 
       let stdout = '';
       child.stdout?.on('data', (chunk: Buffer) => {
         stdout += chunk.toString('utf8');
       });
-      child.on('error', () => resolve(null));
-      child.on('exit', (code) => resolve(code === 0 ? stdout : null));
+      child.on('error', () => {
+        cleanup();
+        resolve(null);
+      });
+      child.on('exit', (code) => {
+        cleanup();
+        resolve(code === 0 ? stdout : null);
+      });
     });
   }
 
@@ -196,10 +246,10 @@ export class UsersService {
    * whether a dangerous event has happened. The caller only needs `outcome`.
    */
   private async analyzePostAgentReport(
+    roleName?: string,
     passKey?: string,
-    roleId?: string,
   ): Promise<AnalysisResult> {
-    let reportText = await this.fetchRemoteReport(passKey, roleId);
+    let reportText = await this.fetchRemoteReport(roleName, passKey);
 
     if (reportText === null) {
       const localPath =
@@ -256,8 +306,8 @@ export class UsersService {
     });
 
     const shouldNotifyAgent = createUserDto.shouldIncludeScan;
+    const selectedRoleName = foundRoles[0]?.roleName;
     const selectedPassKey = foundRoles[0]?.passKey;
-    const selectedRoleId = foundRoles[0]?.roleId;
 
     const agentMessage = shouldNotifyAgent
       ? await this.generateClaudeMessage()
@@ -267,13 +317,13 @@ export class UsersService {
 
     await this.triggerPostAgentCommand(
       agentMessage,
+      selectedRoleName,
       selectedPassKey,
-      selectedRoleId,
     );
 
     // Blue-team step: analyze the report produced by the red-team scan.
     const blueTeam = shouldNotifyAgent
-      ? await this.analyzePostAgentReport(selectedPassKey, selectedRoleId)
+      ? await this.analyzePostAgentReport(selectedRoleName, selectedPassKey)
       : undefined;
 
     return {
